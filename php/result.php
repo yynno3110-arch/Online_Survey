@@ -16,7 +16,11 @@ if ($question_key === '') {
 
 <<<<<<< Updated upstream
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 $survey = get_survey_by_key($question_key, 'question_key');
+=======
+$survey = get_survey_by_key($result_key, 'result_key');
+>>>>>>> Stashed changes
 =======
 $survey = get_survey_by_key($result_key, 'result_key');
 >>>>>>> Stashed changes

@@ -14,7 +14,15 @@ if ($question_key === '') {
 // ① 集計データ取得（グラフ用）
 //====================================
 
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
 $survey = get_survey_by_key($question_key, 'question_key');
+=======
+$survey = get_survey_by_key($result_key, 'result_key');
+>>>>>>> Stashed changes
+=======
+$survey = get_survey_by_key($result_key, 'result_key');
+>>>>>>> Stashed changes
 
 if ($survey === null) {
     renderError('エラー：指定されたアンケートが見つかりません。', 404, 'app', 'WARNING', null, 'Survey Not Found');

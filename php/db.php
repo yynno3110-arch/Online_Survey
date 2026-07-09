@@ -228,24 +228,19 @@ function get_homepage_survey_list(string $listType, string $sortOrder, ?int $use
         'アンケート' => 'all',
         '調査結果' => 'results',
     ];
-    $orderMap = [
-        '開始期限' => 'COALESCE(s.end_at, CURRENT_TIMESTAMP) ASC',
-        '新着' => 's.created_at DESC',
-        '回答数' => 'COALESCE(resp.response_count, 0) DESC, s.created_at DESC',
-    ];
 
-    if (!isset($typeMap[$listType]) || !isset($orderMap[$sortOrder])) {
+    if (!isset($typeMap[$listType])) {
         return [];
     }
 
     $type = $typeMap[$listType];
-    $orderBy = $orderMap[$sortOrder];
 
     $sql = 'SELECT s.survey_id,
                    s.title,
                    s.end_at,
                    s.question_key,
                    s.result_key,
+                   s.created_at,
                    u.account_name AS creator,
                    COALESCE(resp.response_count, 0) AS response_count,
                    s.survey_spec
@@ -293,9 +288,17 @@ function get_homepage_survey_list(string $listType, string $sortOrder, ?int $use
         $sql .= ' WHERE ' . implode(' AND ', $conditions);
     }
 
-    $sql .= " ORDER BY {$orderBy} LIMIT :limit OFFSET :offset";
+    $stmt = executeQuery($sql, $params);
+    $rows = $stmt->fetchAll();
 
-    // ページネーション用パラメータを確実に整数にキャストして設定
+    foreach ($rows as &$row) {
+        $surveySpec = decodeJson($row['survey_spec'] ?? '');
+        $row['deadline'] = $row['end_at'];
+        $row['duration'] = parse_survey_duration($surveySpec);
+        $row['created_at'] = $row['created_at'] ?? null;
+        unset($row['survey_spec'], $row['end_at']);
+    }
+
     $limit = (int)$limit;
     $offset = (int)$offset;
     if ($limit <= 0) {
@@ -305,18 +308,33 @@ function get_homepage_survey_list(string $listType, string $sortOrder, ?int $use
         $offset = 0;
     }
 
-    $params[':limit'] = $limit;
-    $params[':offset'] = $offset;
+    usort($rows, static function (array $a, array $b) use ($sortOrder): int {
+        $deadlineA = (string)($a['deadline'] ?? '');
+        $deadlineB = (string)($b['deadline'] ?? '');
+        $timeA = $deadlineA !== '' ? strtotime($deadlineA) : PHP_INT_MAX;
+        $timeB = $deadlineB !== '' ? strtotime($deadlineB) : PHP_INT_MAX;
 
-    $stmt = executeQuery($sql, $params);
-    $rows = $stmt->fetchAll();
+        $createdA = (string)($a['created_at'] ?? '');
+        $createdB = (string)($b['created_at'] ?? '');
+        $createdTimeA = $createdA !== '' ? strtotime($createdA) : 0;
+        $createdTimeB = $createdB !== '' ? strtotime($createdB) : 0;
 
-    foreach ($rows as &$row) {
-        $surveySpec = decodeJson($row['survey_spec'] ?? '');
-        $row['deadline'] = $row['end_at'];
-        $row['duration'] = parse_survey_duration($surveySpec);
-        unset($row['survey_spec'], $row['end_at']);
-    }
+        switch ($sortOrder) {
+            case 'deadline':
+                return $timeA <=> $timeB;
+            case 'duration':
+                return ((int)$a['duration']) <=> ((int)$b['duration']) ?: $timeA <=> $timeB;
+            case 'ended_recent':
+                return $timeB <=> $timeA ?: $createdTimeB <=> $createdTimeA;
+            case 'responses':
+                return ((int)$b['response_count']) <=> ((int)$a['response_count']) ?: $createdTimeB <=> $createdTimeA;
+            case 'start':
+            default:
+                return $createdTimeB <=> $createdTimeA ?: $timeA <=> $timeB;
+        }
+    });
+
+    $rows = array_slice($rows, $offset, $limit);
 
     return array_map(static function (array $row): array {
         return [
@@ -350,7 +368,7 @@ function extend_survey_deadline(int $survey_id, int $user_id, string $new_end_at
         }
 
         // タイムゾーン対応：明示的にUTCで統一
-        $newEndAtFormatted = date('c', $parsedTime);
+        $newEndAtFormatted = date('Y-m-d H:i:s', $parsedTime);
 
         $sql = "UPDATE surveys 
                 SET end_at = :new_end_at,
@@ -377,23 +395,37 @@ function extend_survey_deadline(int $survey_id, int $user_id, string $new_end_at
 }
 
 /**
- * survey_spec から所要時間を取得する
+ * survey_spec から目安回答時間を自動計算する
+ * ルール: 単一選択=15秒 / 複数選択=20秒 / テキスト=60秒
+ * 合計秒数を分に換算し、1分未満は1分に切り上げる
  */
 function parse_survey_duration(array $surveySpec): int
 {
-    if (isset($surveySpec['estimated_minutes'])) {
-        return (int)$surveySpec['estimated_minutes'];
+    $questions = $surveySpec['questions'] ?? [];
+    if (!is_array($questions) || $questions === []) {
+        return 0;
     }
 
-    if (isset($surveySpec['duration'])) {
-        return (int)$surveySpec['duration'];
+    $totalSeconds = 0;
+    foreach ($questions as $question) {
+        $type = $question['type'] ?? 'single';
+
+        switch ($type) {
+            case 'multiple':
+                $totalSeconds += 20;
+                break;
+            case 'text':
+                $totalSeconds += 60;
+                break;
+            case 'single':
+            default:
+                $totalSeconds += 15;
+                break;
+        }
     }
 
-    if (isset($surveySpec['questions']) && is_array($surveySpec['questions'])) {
-        return count($surveySpec['questions']);
-    }
-
-    return 0;
+    $minutes = (int)ceil($totalSeconds / 60);
+    return max(1, $minutes);
 }
 
 /**

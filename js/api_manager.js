@@ -16,6 +16,77 @@
 
 const pendingLikeRequests = new Map();
 
+function getApiEndpoint() {
+    const currentUrl = new URL(window.location.href);
+    const basePath = currentUrl.pathname.replace(/[^/]*$/, '');
+
+    const candidates = [];
+    const thisDir = currentUrl.pathname.replace(/[^/]*$/, '');
+    if (thisDir.endsWith('/php/')) {
+        candidates.push(new URL('./api.php', currentUrl.href).toString());
+    }
+    candidates.push(new URL('../php/api.php', currentUrl.href).toString());
+    candidates.push(new URL('./php/api.php', currentUrl.href).toString());
+    candidates.push(new URL('/php/api.php', currentUrl.href).toString());
+    candidates.push(new URL('/api.php', currentUrl.href).toString());
+
+    return candidates.filter((value, index, array) => array.indexOf(value) === index)[0];
+}
+
+function escapeHtml(value) {
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+async function readErrorResponse(response) {
+    const contentType = (response.headers.get('content-type') || '').toLowerCase();
+    try {
+        if (contentType.includes('application/json')) {
+            const parsed = await response.json().catch(() => null);
+            if (parsed) {
+                return parsed.message || parsed.error || parsed.detail || JSON.stringify(parsed);
+            }
+        }
+
+        const text = await response.text().catch(() => '');
+        if (text) {
+            return text.replace(/\s+/g, ' ').trim().slice(0, 800);
+        }
+    } catch (error) {
+        return `レスポンスの読み取りに失敗しました: ${error.message}`;
+    }
+
+    return '';
+}
+
+function showApiError(message, detail = '', endpoint = '') {
+    const detailsText = [detail, endpoint ? `送信先: ${endpoint}` : '']
+        .filter(Boolean)
+        .join('\n\n');
+    const fullMessage = detailsText ? `${message}\n\n${detailsText}` : message;
+
+    console.error('[API Error]', fullMessage);
+
+    const existing = document.getElementById('api-error-banner');
+    if (existing) existing.remove();
+
+    const banner = document.createElement('div');
+    banner.id = 'api-error-banner';
+    banner.style.cssText = 'margin:12px 0;padding:12px 14px;border:1px solid #dc2626;background:#fee2e2;color:#991b1b;border-radius:8px;white-space:pre-wrap;font-size:14px;line-height:1.5;';
+    banner.innerHTML = `<strong>通信エラー</strong><br>${escapeHtml(message)}${detailsText ? `<br><br><span style="font-family:monospace">${escapeHtml(detailsText)}</span>` : ''}`;
+
+    const target = document.getElementById('comment-list') || document.getElementById('save-status') || document.querySelector('main');
+    if (target) {
+        target.insertAdjacentElement('beforebegin', banner);
+    }
+
+    alert(fullMessage);
+}
+
 function setLikeButtonPending(commentId, pending) {
     const countElement = document.getElementById(`like-count-${commentId}`);
     const button = countElement ? countElement.closest('button') : null;
@@ -49,7 +120,7 @@ async function postComment() {
     }
 
     // 2. api.phpへ送るデータの梱包
-    const API_ENDPOINT = '/php/api.php';
+    const API_ENDPOINT = getApiEndpoint();
     const formData = new FormData();
     formData.append('action', 'comment');
     formData.append('survey_id', surveyIdInput.value);
@@ -77,13 +148,8 @@ async function postComment() {
         });
 
         if (!response.ok) {
-            const contentType = response.headers.get('content-type') || '';
-            let msg = `通信エラー: ${response.status}`;
-            if (contentType.includes('application/json')) {
-                const err = await response.json().catch(() => null);
-                if (err && err.message) msg = err.message;
-            }
-            alert(msg);
+            const errorDetail = await readErrorResponse(response);
+            showApiError(`コメント投稿に失敗しました。(${response.status} ${response.statusText || ''})`, errorDetail, API_ENDPOINT);
             return;
         }
 
@@ -124,7 +190,7 @@ async function toggleLike(commentId) {
     pendingLikeRequests.set(requestKey, true);
     setLikeButtonPending(requestKey, true);
 
-    const API_ENDPOINT = '/php/api.php';
+    const API_ENDPOINT = getApiEndpoint();
     const formData = new FormData();
     formData.append('action', 'like');
     formData.append('comment_id', commentId);
@@ -151,7 +217,8 @@ async function toggleLike(commentId) {
         });
 
         if (!response.ok) {
-            console.warn('いいね通信エラー', response.status);
+            const errorDetail = await readErrorResponse(response);
+            showApiError(`いいね処理に失敗しました。(${response.status} ${response.statusText || ''})`, errorDetail, API_ENDPOINT);
             return;
         }
 
@@ -169,7 +236,7 @@ async function toggleLike(commentId) {
 
             // キリ番などの条件を満たした場合、音声演出を実行
             if (data.play_voice) {
-                const audio = new Audio('/assets/iidesune_doukome.mp3');
+                const audio = new Audio(new URL('../assets/iidesune_doukome.mp3', window.location.href).toString());
                 audio.play().catch(e => console.warn('音声再生がブラウザにブロックされました', e));
             }
         }
@@ -203,7 +270,7 @@ async function autoSave(type) {
         }
     }
 
-    const API_ENDPOINT = '/php/api.php';
+    const API_ENDPOINT = getApiEndpoint();
     const formData = new FormData();
     formData.append('action', 'save');
     formData.append('type', type);
@@ -232,7 +299,8 @@ async function autoSave(type) {
         });
 
         if (!response.ok) {
-            console.debug('Silent Save failed, server error', response.status);
+            const errorDetail = await readErrorResponse(response);
+            console.debug('Silent Save failed', response.status, errorDetail);
             return;
         }
 

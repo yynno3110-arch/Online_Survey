@@ -900,7 +900,7 @@ try {
                                     <?php foreach ($answered_surveys as $survey): ?>
                                         <div class="survey-row">
                                             <div class="survey-info">
-                                                <div class="survey-date">終了日: <?php echo h(date('Y.m.d', strtotime($survey['deadline'] ?? ''))); ?> <span class="survey-response-count">(回答: <?php echo (int)($survey['response_count'] ?? 0); ?>件)</span> <span class="survey-response-count">(回答: <?php echo (int)($survey['response_count'] ?? 0); ?>件)</span></div>
+                                                <div class="survey-date">終了日: <?php echo h(date('Y.m.d', strtotime($survey['deadline'] ?? ''))); ?> <span class="survey-response-count">(回答: <?php echo (int)($survey['response_count'] ?? 0); ?>件)</span></div>
                                                 <h4 class="survey-title">「<?php echo h($survey['title']); ?>〜」</h4>
                                                 <div class="survey-creator">作成者: <?php echo h($survey['creator'] ?? '不明'); ?></div>
                                             </div>

@@ -22,7 +22,6 @@ start_sess(); // セッション開始（auth.phpの関数を使用）
 //     $_SESSION['user_id'] = 1;
 //     $_SESSION['account_name'] = 'a';
 // }
-
 // 安全にHTMLエスケープを行うための共通関数
 if (!function_exists('h')) {
     function h($string) {
@@ -66,7 +65,7 @@ $current_user_id = $is_logged_in ? (int)$_SESSION['user_id'] : null;
 //     }
 // }
 
-// 新しくホームページに戻った時は必ず新着順にする
+// 新しくホームページに戻った時は必ず開始日時順にする
 $has_any_sort_param = isset($_GET['s_cre']) || isset($_GET['s_ans']) || isset($_GET['s_act']) || isset($_GET['s_res']);
 if (!$has_any_sort_param) {
     $sort_cre = 'start';
@@ -85,7 +84,7 @@ function get_sort_order_text($type) {
     if ($type === 'duration') return '目安時間が短い順';
     if ($type === 'ended_recent') return '最近終了した順';
     if ($type === 'responses') return '回答数';
-    return '新着';
+    return '開始日時順';
 }
 
 $order_cre = get_sort_order_text($sort_cre);
@@ -159,14 +158,14 @@ try {
     // 1. ログインユーザー専用データ（MY SURVEY）
     if ($is_logged_in && $current_user_id !== null) {
         // 作成したアンケート
-        $all_created = get_homepage_survey_list('作成したアンケート', $sort_cre, $current_user_id);
+        $all_created = get_homepage_survey_list('作成したアンケート', $sort_cre, $current_user_id, 0, 0);
         $total_created = count($all_created);
         $total_pages_created = (int)ceil($total_created / $limit);
         if ($total_pages_created < 1) $total_pages_created = 1;
         $created_surveys = array_slice($all_created, $offset_created, $limit);
 
         // 回答したアンケート
-        $all_answered = get_homepage_survey_list('回答したアンケート', $sort_ans, $current_user_id);
+        $all_answered = get_homepage_survey_list('回答したアンケート', $sort_ans, $current_user_id, 0, 0);
         $total_answered = count($all_answered);
         $total_pages_answered = (int)ceil($total_answered / $limit);
         if ($total_pages_answered < 1) $total_pages_answered = 1;
@@ -174,14 +173,14 @@ try {
     }
     
     // 2. 全体公開用アンケート（SURVEY）
-    $all_active_surveys = get_homepage_survey_list('アンケート', $sort_act, null);
+    $all_active_surveys = get_homepage_survey_list('アンケート', $sort_act, null, 0, 0);
     $total_active = count($all_active_surveys);
     $total_pages_active = (int)ceil($total_active / $limit);
     if ($total_pages_active < 1) $total_pages_active = 1;
     $active_surveys = array_slice($all_active_surveys, $offset_active, $limit);
 
     // 3. 全体公開用調査結果（RESULTS）
-    $all_result_surveys = get_homepage_survey_list('調査結果', $sort_res, null);
+    $all_result_surveys = get_homepage_survey_list('調査結果', $sort_res, null, 0, 0);
     $total_result = count($all_result_surveys);
     $total_pages_result = (int)ceil($total_result / $limit);
     if ($total_pages_result < 1) $total_pages_result = 1;
@@ -189,6 +188,13 @@ try {
 
 } catch (Exception $e) {
     error_log("データ抽出エラー: " . $e->getMessage());
+}
+
+// フラッシュメッセージの取得と削除
+$alert_message = '';
+if (!empty($_SESSION['flash_message'])) {
+    $alert_message = $_SESSION['flash_message'];
+    unset($_SESSION['flash_message']); // 一度取得したらセッションから消す
 }
 ?>
 <!DOCTYPE html>
@@ -801,7 +807,7 @@ try {
                             <div class="sort-popup">
                                 <div class="sort-popup-close">×</div>
                                 <div class="sort-option-list">
-                                    <button class="sort-option" data-sort-param="s_cre" data-page-param="p_cre" data-sort-type="start">新着順</button>
+                                    <button class="sort-option" data-sort-param="s_cre" data-page-param="p_cre" data-sort-type="start">開始日時順</button>
                                     <button class="sort-option" data-sort-param="s_cre" data-page-param="p_cre" data-sort-type="deadline">締め切りが近い順</button>
                                     <button class="sort-option" data-sort-param="s_cre" data-page-param="p_cre" data-sort-type="responses">回答数が多い順</button>
                                 </div>
@@ -823,14 +829,12 @@ try {
                                     <?php foreach ($created_surveys as $survey): ?>
                                         <div class="survey-row" id="survey-card-<?php echo h($survey['survey_id']); ?>">
                                             <div class="survey-info">
-                                                <div class="survey-date">
-                                                    締め切り: 
-                                                    <span id="date-box-<?php echo h($survey['survey_id']); ?>">
-                                                        <?php echo h(date('Y.m.d H:i', strtotime($survey['deadline'] ?? ''))); ?>
-                                                    </span>
-                                                    (回答: <?php echo (int)($survey['response_count'] ?? 0); ?>件)
-                                                </div>
+                                                <div class="survey-date">開始日: <?php echo h(date('Y.m.d', strtotime($survey['start_at'] ?? ''))); ?> ｜ 終了日: <?php echo h(date('Y.m.d', strtotime($survey['deadline'] ?? ''))); ?></div>
                                                 <h4 class="survey-title">「<?php echo h($survey['title']); ?>〜」</h4>
+                                                <div class="survey-creator">
+                                                    作成者: <?php echo h($survey['creator'] ?? '不明'); ?>
+                                                    <span class="survey-response-count">(回答: <?php echo (int)($survey['response_count'] ?? 0); ?>件)</span>
+                                                </div>
                                             </div>
                                             <div class="survey-actions">
                                                 <input type="datetime-local"
@@ -878,7 +882,7 @@ try {
                             <div class="sort-popup">
                                 <div class="sort-popup-close">×</div>
                                 <div class="sort-option-list">
-                                    <button class="sort-option" data-sort-param="s_ans" data-page-param="p_ans" data-sort-type="start">新着順</button>
+                                    <button class="sort-option" data-sort-param="s_ans" data-page-param="p_ans" data-sort-type="start">開始日時順</button>
                                     <button class="sort-option" data-sort-param="s_ans" data-page-param="p_ans" data-sort-type="deadline">締め切りが近い順</button>
                                     <button class="sort-option" data-sort-param="s_ans" data-page-param="p_ans" data-sort-type="responses">回答数が多い順</button>
                                 </div>
@@ -900,9 +904,9 @@ try {
                                     <?php foreach ($answered_surveys as $survey): ?>
                                         <div class="survey-row">
                                             <div class="survey-info">
-                                                <div class="survey-date">終了日: <?php echo h(date('Y.m.d', strtotime($survey['deadline'] ?? ''))); ?> <span class="survey-response-count">(回答: <?php echo (int)($survey['response_count'] ?? 0); ?>件)</span></div>
+                                                <div class="survey-date">開始日: <?php echo h(date('Y.m.d', strtotime($survey['start_at'] ?? ''))); ?>｜終了日: <?php echo h(date('Y.m.d', strtotime($survey['deadline'] ?? ''))); ?></div>
                                                 <h4 class="survey-title">「<?php echo h($survey['title']); ?>〜」</h4>
-                                                <div class="survey-creator">作成者: <?php echo h($survey['creator'] ?? '不明'); ?></div>
+                                                <div class="survey-creator">作成者: <?php echo h($survey['creator'] ?? '不明'); ?> <span class="survey-response-count">(回答: <?php echo (int)($survey['response_count'] ?? 0); ?>件)</span></div>
                                             </div>
                                             <div class="survey-actions">
                                                 <a href="result.php?id=<?php echo h($survey['question_key']); ?>" class="action-inline-btn btn-result-orange lift-button">結果</a>
@@ -945,7 +949,7 @@ try {
                         <div class="sort-popup">
                             <div class="sort-popup-close">×</div>
                             <div class="sort-option-list">
-                                <button class="sort-option" data-sort-param="s_act" data-page-param="p_act" data-sort-type="start">新着順</button>
+                                <button class="sort-option" data-sort-param="s_act" data-page-param="p_act" data-sort-type="start">開始日時順</button>
                                 <button class="sort-option" data-sort-param="s_act" data-page-param="p_act" data-sort-type="deadline">締め切りが近い順</button>
                                 <button class="sort-option" data-sort-param="s_act" data-page-param="p_act" data-sort-type="duration">目安時間が短い順</button>
                                 <button class="sort-option" data-sort-param="s_act" data-page-param="p_act" data-sort-type="responses">回答数が多い順</button>
@@ -968,22 +972,25 @@ try {
                                 <?php foreach ($active_surveys as $survey): ?>
                                     <?php 
                                         $required_time = isset($survey['duration']) ? (int)$survey['duration'] : 0; 
-                                        $start_date_str = isset($survey['created_at']) ? date('m月d日', strtotime($survey['created_at'])) : date('m月d日', strtotime($survey['start_date'] ?? 'now'));
+                                        $start_date_str = isset($survey['start_at']) ? date('m月d日', strtotime($survey['start_at'])) : date('m月d日', strtotime($survey['created_at'] ?? 'now'));
                                     ?>
                                     <div class="survey-row">
                                         <div class="survey-info">
                                             <div class="survey-date">
-                                                終了時刻: 
+                                                開始日時: 
+                                                <span id="public-date-box-<?php echo h($survey['survey_id']); ?>">
+                                                    <?php echo h(date('Y.m.d H:i', strtotime($survey['start_at'] ?? '')) . ' ｜ '); ?>
+                                                </span>
+                                                終了日時: 
                                                 <span id="public-date-box-<?php echo h($survey['survey_id']); ?>">
                                                     <?php echo h(date('Y.m.d H:i', strtotime($survey['deadline'] ?? ''))); ?>
                                                 </span>
-                                                <span class="survey-response-count">(回答: <?php echo (int)($survey['response_count'] ?? 0); ?>件)</span>
                                                 <?php if ($required_time > 0): ?>
-                                                    <span class="alert-time-text"> (目安時間: <?php echo h($required_time); ?>分)</span>
+                                                    <br><span class="alert-time-text"> (目安時間: <?php echo h($required_time); ?>分)</span>
                                                 <?php endif; ?>
                                             </div>
                                             <h4 class="survey-title">「<?php echo h($survey['title']); ?>〜」</h4>
-                                            <div class="survey-creator">作成者: <?php echo h($survey['creator'] ?? '不明'); ?></div>
+                                            <div class="survey-creator">作成者: <?php echo h($survey['creator'] ?? '不明'); ?> <span class="survey-response-count">(回答: <?php echo (int)($survey['response_count'] ?? 0); ?>件)</span></div>
                                         </div>
                                         <div class="survey-actions">
                                             <a href="result.php?id=<?php echo h($survey['question_key']); ?>" class="action-inline-btn btn-result-orange lift-button">結果</a>
@@ -1025,7 +1032,7 @@ try {
                         <div class="sort-popup">
                             <div class="sort-popup-close">×</div>
                             <div class="sort-option-list">
-                                <button class="sort-option" data-sort-param="s_res" data-page-param="p_res" data-sort-type="start">新着順</button>
+                                <button class="sort-option" data-sort-param="s_res" data-page-param="p_res" data-sort-type="start">開始日時順</button>
                                 <button class="sort-option" data-sort-param="s_res" data-page-param="p_res" data-sort-type="ended_recent">最近終了した順</button>
                                 <button class="sort-option" data-sort-param="s_res" data-page-param="p_res" data-sort-type="responses">回答数が多い順</button>
                             </div>
@@ -1050,9 +1057,9 @@ try {
                                     ?>
                                     <div class="survey-row">
                                         <div class="survey-info">
-                                            <div class="survey-date">終了日: <?php echo h(date('Y.m.d', strtotime($survey['deadline'] ?? ''))); ?> <span class="survey-response-count">(回答: <?php echo (int)($survey['response_count'] ?? 0); ?>件)</span></div>
+                                            <div class="survey-date">開始日: <?php echo h(date('Y.m.d', strtotime($survey['start_at'] ?? ''))); ?> ｜ 終了日: <?php echo h(date('Y.m.d', strtotime($survey['deadline'] ?? ''))); ?></div>
                                             <h4 class="survey-title">「<?php echo h($survey['title']); ?>〜」</h4>
-                                            <div class="survey-creator">作成者: <?php echo h($survey['creator'] ?? '不明'); ?></div>
+                                            <div class="survey-creator">作成者: <?php echo h($survey['creator'] ?? '不明'); ?> <span class="survey-response-count">(回答: <?php echo (int)($survey['response_count'] ?? 0); ?>件)</span></div>
                                         </div>
                                         <div class="survey-actions">
                                             <a href="result.php?id=<?php echo h($survey['question_key']); ?>" class="action-inline-btn btn-result-red lift-button">結果(<?php echo h($deadline_str); ?>~)</a>

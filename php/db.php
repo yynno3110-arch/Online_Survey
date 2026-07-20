@@ -226,7 +226,7 @@ function get_all_survey_titles(): array
  * @param int $offset 取得開始位置
  * @return array
  */
-function get_homepage_survey_list(string $listType, string $sortOrder, ?int $user_id = null, int $limit = 100, int $offset = 0): array
+function get_homepage_survey_list(string $listType, string $sortOrder, ?int $user_id = null, int $limit = 0, int $offset = 0): array
 {
     $typeMap = [
         '作成したアンケート' => 'created',
@@ -243,6 +243,7 @@ function get_homepage_survey_list(string $listType, string $sortOrder, ?int $use
 
     $sql = 'SELECT s.survey_id,
                    s.title,
+                   s.start_at,
                    s.end_at,
                    s.question_key,
                    s.result_key,
@@ -299,6 +300,7 @@ function get_homepage_survey_list(string $listType, string $sortOrder, ?int $use
 
     foreach ($rows as &$row) {
         $surveySpec = decodeJson($row['survey_spec'] ?? '');
+        $row['start_at'] = $row['start_at'] ?? null;
         $row['deadline'] = $row['end_at'];
         $row['duration'] = parse_survey_duration($surveySpec);
         $row['created_at'] = $row['created_at'] ?? null;
@@ -307,11 +309,11 @@ function get_homepage_survey_list(string $listType, string $sortOrder, ?int $use
 
     $limit = (int)$limit;
     $offset = (int)$offset;
-    if ($limit <= 0) {
-        $limit = 100;
-    }
     if ($offset < 0) {
         $offset = 0;
+    }
+    if ($limit < 0) {
+        $limit = 0;
     }
 
     usort($rows, static function (array $a, array $b) use ($sortOrder): int {
@@ -325,6 +327,11 @@ function get_homepage_survey_list(string $listType, string $sortOrder, ?int $use
         $createdTimeA = $createdA !== '' ? strtotime($createdA) : 0;
         $createdTimeB = $createdB !== '' ? strtotime($createdB) : 0;
 
+        $startA = (string)($a['start_at'] ?? '');
+        $startB = (string)($b['start_at'] ?? '');
+        $startTimeA = $startA !== '' ? strtotime($startA) : 0;
+        $startTimeB = $startB !== '' ? strtotime($startB) : 0;
+
         switch ($sortOrder) {
             case 'deadline':
                 return $timeA <=> $timeB;
@@ -336,16 +343,21 @@ function get_homepage_survey_list(string $listType, string $sortOrder, ?int $use
                 return ((int)$b['response_count']) <=> ((int)$a['response_count']) ?: $createdTimeB <=> $createdTimeA;
             case 'start':
             default:
-                return $createdTimeB <=> $createdTimeA ?: $timeA <=> $timeB;
+                return $startTimeB <=> $startTimeA ?: $createdTimeB <=> $createdTimeA;
         }
     });
 
-    $rows = array_slice($rows, $offset, $limit);
+    if ($limit > 0) {
+        $rows = array_slice($rows, $offset, $limit);
+    } else {
+        $rows = array_slice($rows, $offset);
+    }
 
     return array_map(static function (array $row): array {
         return [
             'survey_id' => (int)$row['survey_id'],
             'title' => (string)$row['title'],
+            'start_at' => $row['start_at'] !== null ? $row['start_at'] : null,
             'deadline' => $row['deadline'] !== null ? $row['deadline'] : null,
             'creator' => (string)$row['creator'],
             'response_count' => (int)$row['response_count'],

@@ -3,10 +3,17 @@ require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/error.php';
 start_sess();
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/security.php';
+
+$commentError = false;
 
 if($_SERVER["REQUEST_METHOD"] == "POST"){
     if(isset($_POST["commentSend"])){
-        insert_comment($_POST["survey_id"], $_SESSION["user_id"], $_POST["comment"]);
+        if(checkWord($_POST["comment"])){
+            insert_comment($_POST["survey_id"], $_SESSION["user_id"], $_POST["comment"]);
+        }else{
+            $commentError = true;
+        }
     }
 }
 
@@ -108,14 +115,37 @@ if (isset($spec_data['questions']) && is_array($spec_data['questions'])) {
         if ($chart_type === 'histogram') {
             $chart_type = 'bar';
         }
+        $chart_type = $chart_type === 'band' ? 'bar' : $chart_type;
+
+        $chart_variant = ($q['result_display'] ?? '') === 'band' ? 'band' : 'standard';
+        $chart_colors = ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0'];
+        $chart_labels = $chart_variant === 'band' ? ['回答分布'] : $labels;
+        $chart_datasets = [];
+
+        if ($chart_variant === 'band') {
+            foreach ($labels as $idx => $label) {
+                $chart_datasets[] = [
+                    'label' => (string)$label,
+                    'data' => [(int)($data[$idx] ?? 0)],
+                    'backgroundColor' => $chart_colors[$idx % count($chart_colors)],
+                ];
+            }
+        } else {
+            $chart_datasets[] = [
+                'label' => '回答数',
+                'data' => $data,
+                'backgroundColor' => $chart_colors,
+            ];
+        }
 
         $question_results[] = [
             'type' => 'chart',
             'q_id' => $q_id,
             'title' => $q_title,
             'chart_type' => $chart_type,
-            'labels' => $labels,
-            'data' => $data,
+            'chart_variant' => $chart_variant,
+            'chart_labels' => $chart_labels,
+            'chart_datasets' => $chart_datasets,
         ];
     }
 }
@@ -258,6 +288,28 @@ $comment_list_data = get_comments_by_survey_id((int)$survey_id);
     <?php else:?>
         <p>回答はまだありません</p>
     <?php endif?>
+    <?php if($commentError): ?>
+        <script>
+            document.addEventListener('DOMContentLoaded', function () {
+                const dialog = document.getElementById('comment-error-dialog');
+                if (dialog) {
+                    if (typeof dialog.showModal === 'function') {
+                        dialog.showModal();
+                    } else {
+                        dialog.setAttribute('open', '');
+                    }
+                }
+            });
+        </script>
+        <dialog id="comment-error-dialog" style="border:0; border-radius:16px; box-shadow:0 20px 50px rgba(0,0,0,0.35); padding:0; max-width:420px; width:min(90vw, 420px);">
+            <form method="dialog" style="margin:0; padding:24px 24px 20px; text-align:center; background:linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);">
+                <div style="font-size:28px; margin-bottom:10px;">⚠️</div>
+                <h3 style="margin:0 0 8px; font-size:18px; color:#111827;">不適切な内容です</h3>
+                <p style="margin:0 0 16px; color:#4b5563; line-height:1.6;">登録できない語が含まれています。<br>別の表現に直してください。</p>
+                <button type="submit" style="border:0; border-radius:999px; padding:10px 18px; background:#2563eb; color:#fff; font-weight:600; cursor:pointer;">閉じる</button>
+            </form>
+        </dialog>
+    <?php endif; ?>
 </main>
 
 <form id="main-form" style="display:none;"></form>
@@ -272,21 +324,30 @@ Chart.defaults.color = '#ffffff';
 {
     const ctx = document.getElementById('chart-<?= htmlspecialchars((string)$result['q_id']) ?>');
     if (ctx) {
-        new Chart(ctx, {
+        const chartVariant = <?= json_encode($result['chart_variant'] ?? 'standard') ?>;
+        const chartData = {
+            labels: <?= json_encode($result['chart_labels'] ?? []) ?>,
+            datasets: <?= json_encode($result['chart_datasets'] ?? []) ?>
+        };
+
+        const chartConfig = {
             type: '<?= htmlspecialchars((string)$result['chart_type']) ?>',
-            data: {
-                labels: <?= json_encode($result['labels']) ?>,
-                datasets: [{
-                    label: '回答数',
-                    data: <?= json_encode($result['data']) ?>,
-                    backgroundColor: ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0']
-                }]
-            },
+            data: chartData,
             options: {
                 responsive: true,
                 maintainAspectRatio: false
             }
-        });
+        };
+
+        if (chartVariant === 'band') {
+            chartConfig.options.indexAxis = 'y';
+            chartConfig.options.scales = {
+                x: { stacked: true },
+                y: { stacked: true }
+            };
+        }
+
+        new Chart(ctx, chartConfig);
     }
 }
 <?php } ?>

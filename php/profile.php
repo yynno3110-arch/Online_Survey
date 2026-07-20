@@ -129,7 +129,7 @@
                                 $_SESSION['user_id'] = $user_id;
                                 $_SESSION['username'] = $newusername;
                                 $_SESSION['last_acc'] = time();
-                                header('Location: /php/index.php');
+                                header('Location: ../php/index.php');
                                 exit;
                             }else{
                                 echo "<div class=\"profile-alert\">失敗</div>";
